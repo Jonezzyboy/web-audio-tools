@@ -3,27 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced Sequencer</title>
+  <title>Collaborative Sequencer</title>
   <link rel="stylesheet" href="theme.css">
   <style>
-    /* Shared styles moved to theme.css. Page-specific animations below. */
+    /* Cursor & Avatar Styles */
+    #cursorLayer {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; /* Let clicks pass through */
+      overflow: hidden;
+      z-index: 1000;
+    }
 
-    @keyframes slideIn {
-      from {
-        opacity: 0;
-        transform: translateX(-10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateX(0);
-      }
+    .remote-cursor {
+      position: absolute;
+      transition: transform 0.1s linear;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .cursor-pointer {
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 12px solid; /* Color set via JS */
+    }
+
+    .cursor-label {
+      background: rgba(0,0,0,0.7);
+      color: white;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      margin-top: 2px;
+      white-space: nowrap;
     }
   </style>
 </head>
 <body>
 
-<div class="container">
-  <h1>Tone Sequencer</h1>
+<div id="cursorLayer"></div>
+
+<div class="container" id="appContainer">
+  <h1>Tone Sequencer <span id="connectionStatus" style="font-size:0.5em; color:#b2bec3;">(Offline)</span></h1>
 
   <canvas id="visualizer" class="viz-canvas" width="500" height="100"></canvas>
 
@@ -70,52 +96,164 @@
 
 <script>
   // --- STATE ---
-  let sequence = [1.0, 1.25, 1.5]; // Default Triad
+  let sequence = [1.0, 1.25, 1.5];
   let audioCtx = null;
   let isPlaying = false;
   let animationId = null;
-  let scheduledEvents = []; // For timeline tracking
+  let scheduledEvents = [];
+
+  // --- WEBSOCKET SETUP ---
+  // Connect to local server (see Node.js snippet below)
+  const ws = new WebSocket('ws://localhost:8080');
+  const myId = Math.random().toString(36).substr(2, 9);
+  const myColor = '#' + Math.floor(Math.random()*16777215).toString(16);
 
   const els = {
     container: document.getElementById('sequenceContainer'),
-    // Ranges
-    speedR: document.getElementById('speedRange'),
-    freqR:  document.getElementById('freqRange'),
-    decayR: document.getElementById('decayRange'),
-    // Numbers
-    speedN: document.getElementById('speedNum'),
-    freqN:  document.getElementById('freqNum'),
-    decayN: document.getElementById('decayNum'),
-    wave:   document.getElementById('waveType'),
-    // Buttons
-    addBtn:  document.getElementById('addToneBtn'),
-    playBtn: document.getElementById('playBtn'),
-    dlBtn:   document.getElementById('downloadBtn'),
-    // Visuals
-    canvas: document.getElementById('visualizer')
+    app:       document.getElementById('appContainer'),
+    cursorLayer: document.getElementById('cursorLayer'),
+    status:    document.getElementById('connectionStatus'),
+    speedR:    document.getElementById('speedRange'),
+    freqR:     document.getElementById('freqRange'),
+    decayR:    document.getElementById('decayRange'),
+    speedN:    document.getElementById('speedNum'),
+    freqN:     document.getElementById('freqNum'),
+    decayN:    document.getElementById('decayNum'),
+    wave:      document.getElementById('waveType'),
+    addBtn:    document.getElementById('addToneBtn'),
+    playBtn:   document.getElementById('playBtn'),
+    dlBtn:     document.getElementById('downloadBtn'),
+    canvas:    document.getElementById('visualizer')
   };
   const canvasCtx = els.canvas.getContext('2d');
 
-  // --- SYNC INPUTS (Granular Controls) ---
-  function linkInputs(range, num)
-  {
-    range.addEventListener('input', () => num.value = range.value);
-    num.addEventListener('input', () => range.value = num.value);
+  // --- WEBSOCKET HANDLERS ---
+
+  ws.onopen = () => {
+    els.status.innerText = '(Connected)';
+    els.status.style.color = 'green';
+    // Send initial "hello"
+    sendMsg({ type: 'join', color: myColor });
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    // Ignore messages from self
+    if (msg.id === myId) return;
+
+    switch (msg.type) {
+      case 'state_update':
+        // Update local state without triggering another send
+        updateStateFromRemote(msg.data);
+        break;
+      case 'cursor_move':
+        updateRemoteCursor(msg.id, msg.x, msg.y, msg.color);
+        break;
+      case 'client_left':
+        removeCursor(msg.id);
+        break;
+    }
+  };
+
+  function sendMsg(payload) {
+    if (ws.readyState === WebSocket.OPEN) {
+      payload.id = myId;
+      ws.send(JSON.stringify(payload));
+    }
+  }
+
+  function broadcastState() {
+    sendMsg({
+      type: 'state_update',
+      data: {
+        sequence: sequence,
+        speed: els.speedN.value,
+        freq: els.freqN.value,
+        decay: els.decayN.value,
+        wave: els.wave.value
+      }
+    });
+  }
+
+  // --- CURSOR LOGIC ---
+
+  document.addEventListener('mousemove', (e) => {
+    // Throttle slightly in production, raw here for simplicity
+    sendMsg({
+      type: 'cursor_move',
+      x: e.pageX,
+      y: e.pageY,
+      color: myColor
+    });
+  });
+
+  function updateRemoteCursor(id, x, y, color) {
+    let cursor = document.getElementById(`cursor-${id}`);
+    if (!cursor) {
+      cursor = document.createElement('div');
+      cursor.id = `cursor-${id}`;
+      cursor.className = 'remote-cursor';
+
+      const ptr = document.createElement('div');
+      ptr.className = 'cursor-pointer';
+      ptr.style.borderBottomColor = color;
+
+      const lbl = document.createElement('div');
+      lbl.className = 'cursor-label';
+      lbl.innerText = 'User ' + id.substr(0,4);
+
+      cursor.appendChild(ptr);
+      cursor.appendChild(lbl);
+      els.cursorLayer.appendChild(cursor);
+    }
+    cursor.style.transform = `translate(${x}px, ${y}px)`;
+  }
+
+  function removeCursor(id) {
+    const cursor = document.getElementById(`cursor-${id}`);
+    if (cursor) cursor.remove();
+  }
+
+  // --- SYNC LOGIC ---
+
+  function updateStateFromRemote(data) {
+    // Update variables
+    sequence = data.sequence;
+    els.speedN.value = els.speedR.value = data.speed;
+    els.freqN.value = els.freqR.value = data.freq;
+    els.decayN.value = els.decayR.value = data.decay;
+    els.wave.value = data.wave;
+
+    // Re-render UI
+    renderRows(false); // Pass false to avoid rebroadcasting
+  }
+
+  // --- INPUT BINDINGS ---
+  function linkInputs(range, num) {
+    range.addEventListener('input', () => {
+      num.value = range.value;
+      broadcastState();
+    });
+    num.addEventListener('input', () => {
+      range.value = num.value;
+      broadcastState();
+    });
   }
 
   linkInputs(els.speedR, els.speedN);
   linkInputs(els.freqR, els.freqN);
   linkInputs(els.decayR, els.decayN);
 
+  els.wave.addEventListener('change', broadcastState);
+
   // --- UI RENDER ---
-  function renderRows()
-  {
+  function renderRows(shouldBroadcast = true) {
     els.container.innerHTML = '';
-    sequence.forEach((multiplier, index) =>
-    {
+    sequence.forEach((multiplier, index) => {
       const row = document.createElement('div');
       row.className = 'tone-row';
-      row.id = `row-${index}`; // Needed for timeline lookup
+      row.id = `row-${index}`;
 
       const label = document.createElement('span');
       label.innerText = `#${index + 1}`;
@@ -124,64 +262,58 @@
       input.type = 'number';
       input.step = '0.01';
       input.value = multiplier;
-      input.onchange = (e) => sequence[index] = parseFloat(e.target.value);
+      // When a user changes a note
+      input.onchange = (e) => {
+        sequence[index] = parseFloat(e.target.value);
+        broadcastState();
+      };
 
       const delBtn = document.createElement('button');
       delBtn.innerText = '✕';
-      delBtn.onclick = () =>
-      {
-        if(sequence.length > 1)
-        {
+      delBtn.onclick = () => {
+        if(sequence.length > 1) {
           sequence.splice(index, 1);
-          renderRows();
+          renderRows(); // Will broadcast by default
         }
       };
-      if(sequence.length <= 1)
-      {
-        delBtn.disabled = true;
-      }
+      if(sequence.length <= 1) delBtn.disabled = true;
 
       row.appendChild(label);
       row.appendChild(input);
       row.appendChild(delBtn);
       els.container.appendChild(row);
     });
+
+    if(shouldBroadcast) broadcastState();
   }
 
-  els.addBtn.addEventListener('click', () =>
-  {
+  els.addBtn.addEventListener('click', () => {
     sequence.push(sequence[sequence.length - 1] || 1.0);
     renderRows();
   });
 
-  // --- AUDIO & TIMELINE LOGIC ---
-
-  // Generate Audio Graph
-  function scheduleAudio(ctx, destination, startTime, isLivePlayback)
-  {
+  // --- AUDIO ENGINE (Unchanged from previous version) ---
+  function scheduleAudio(ctx, destination, startTime, isLivePlayback) {
     const baseFreq = parseFloat(els.freqN.value);
     const speedSeconds = parseFloat(els.speedN.value) / 1000;
     const decaySetting = parseFloat(els.decayN.value) * 0.1;
     const waveType = els.wave.value;
 
-    scheduledEvents = []; // Reset timeline tracker
+    scheduledEvents = [];
 
-    // Master Gain for visualizer hookup
     const masterGain = ctx.createGain();
     masterGain.connect(destination);
-    masterGain.gain.value = 0.5; // Avoid clipping
+    masterGain.gain.value = 0.5;
 
     let currentTime = startTime;
 
-    sequence.forEach((multiplier, index) =>
-    {
+    sequence.forEach((multiplier, index) => {
       const osc = ctx.createOscillator();
       const noteGain = ctx.createGain();
 
       osc.type = waveType;
       osc.frequency.setValueAtTime(baseFreq * multiplier, currentTime);
 
-      // Envelope
       noteGain.gain.setValueAtTime(0, currentTime);
       noteGain.gain.linearRampToValueAtTime(1, currentTime + 0.01);
       noteGain.gain.exponentialRampToValueAtTime(0.001, currentTime + decaySetting + 0.1);
@@ -193,145 +325,95 @@
       osc.start(currentTime);
       osc.stop(currentTime + duration);
 
-      // Store timeline data
-      if(isLivePlayback)
-      {
+      if(isLivePlayback) {
         scheduledEvents.push({
           index: index,
           start: currentTime,
           end:   currentTime + speedSeconds
         });
       }
-
       currentTime += speedSeconds;
     });
 
     return {endTime: currentTime + 0.5, masterNode: masterGain};
   }
 
-  // --- VISUALIZER & TIMELINE LOOP ---
-  function startVisualizer(analyser)
-  {
+  // --- VISUALIZER LOOP ---
+  function startVisualizer(analyser) {
     analyser.fftSize = 2048;
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
-    function draw()
-    {
-      if(!isPlaying)
-      {
-        return;
-      }
-
+    function draw() {
+      if(!isPlaying) return;
       animationId = requestAnimationFrame(draw);
 
-      // 1. Draw Waveform
       analyser.getByteTimeDomainData(dataArray);
       canvasCtx.fillStyle = 'rgb(45, 52, 54)';
       canvasCtx.fillRect(0, 0, els.canvas.width, els.canvas.height);
       canvasCtx.lineWidth = 2;
-      canvasCtx.strokeStyle = 'rgb(85, 239, 196)'; // Neon Green
+      canvasCtx.strokeStyle = 'rgb(85, 239, 196)';
       canvasCtx.beginPath();
 
       const sliceWidth = els.canvas.width * 1.0 / bufferLength;
       let x = 0;
 
-      for(let i = 0; i < bufferLength; i++)
-      {
+      for(let i = 0; i < bufferLength; i++) {
         const v = dataArray[i] / 128.0;
         const y = v * els.canvas.height / 2;
-        if(i === 0)
-        {
-          canvasCtx.moveTo(x, y);
-        }
-        else
-        {
-          canvasCtx.lineTo(x, y);
-        }
+        if(i === 0) canvasCtx.moveTo(x, y);
+        else canvasCtx.lineTo(x, y);
         x += sliceWidth;
       }
       canvasCtx.lineTo(els.canvas.width, els.canvas.height / 2);
       canvasCtx.stroke();
 
-      // 2. Update Timeline (Highlight Rows)
+      // Timeline Logic
       const now = audioCtx.currentTime;
-
-      // Clear all highlights
       document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
-
-      // Find active note
       const activeEvent = scheduledEvents.find(e => now >= e.start && now < e.end);
-      if(activeEvent)
-      {
+      if(activeEvent) {
         const row = document.getElementById(`row-${activeEvent.index}`);
-        if(row)
-        {
-          row.classList.add('is-playing');
-          // Optional: Scroll to view
-          row.scrollIntoView({behavior: 'smooth', block: 'nearest'});
-        }
+        if(row) row.classList.add('is-playing');
       }
     }
-
     draw();
   }
 
-  // --- PLAYBACK ---
-  els.playBtn.addEventListener('click', () =>
-  {
-    if(isPlaying)
-    {
-      return;
-    } // Prevent double click
-
+  // --- PLAYBACK HANDLERS ---
+  els.playBtn.addEventListener('click', () => {
+    if(isPlaying) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AudioContext();
     isPlaying = true;
     els.playBtn.disabled = true;
 
-    // Create Analyser
     const analyser = audioCtx.createAnalyser();
-
-    // Schedule Audio
-    const {endTime, masterNode} = scheduleAudio(audioCtx, analyser, audioCtx.currentTime + 0.1, true);
-
-    // Connect to speakers
+    const {endTime} = scheduleAudio(audioCtx, analyser, audioCtx.currentTime + 0.1, true);
     analyser.connect(audioCtx.destination);
-
-    // Start Loops
     startVisualizer(analyser);
 
-    // Cleanup when done
     const totalDuration = (endTime - audioCtx.currentTime) * 1000;
-    setTimeout(() =>
-    {
+    setTimeout(() => {
       isPlaying = false;
       els.playBtn.disabled = false;
       cancelAnimationFrame(animationId);
-      // Clear final highlight
       document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
       audioCtx.close();
     }, totalDuration);
   });
 
-  // --- DOWNLOAD ---
-  els.dlBtn.addEventListener('click', async () =>
-  {
+  els.dlBtn.addEventListener('click', async () => {
     const originalText = els.dlBtn.innerText;
     els.dlBtn.innerText = 'Render...';
-
     const speedVal = parseFloat(els.speedN.value) / 1000;
     const duration = (sequence.length * speedVal) + 2.0;
     const sampleRate = 44100;
-
     const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
-
     scheduleAudio(offlineCtx, offlineCtx.destination, 0.1, false);
-
     const renderedBuffer = await offlineCtx.startRendering();
     const wavBytes = bufferToWave(renderedBuffer);
     const blob = new Blob([wavBytes], {type: 'audio/wav'});
-
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -341,40 +423,25 @@
     els.dlBtn.innerText = originalText;
   });
 
-  // --- WAV ENCODER UTILITY ---
-  function bufferToWave(abuffer)
-  {
+  function bufferToWave(abuffer) {
     let numOfChan = abuffer.numberOfChannels,
       length = abuffer.length * numOfChan * 2 + 44,
       buffer = new ArrayBuffer(length),
       view = new DataView(buffer),
-      channels = [], i, sample,
-      offset = 0, pos = 0;
+      channels = [], i, sample, offset = 0, pos = 0;
 
-    // Header
-    setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8);
-    setUint32(0x45564157); // "WAVE"
-    setUint32(0x20746d66); // "fmt "
-    setUint32(16);
-    setUint16(1); // PCM
-    setUint16(numOfChan);
-    setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan);
-    setUint16(numOfChan * 2);
-    setUint16(16);
-    setUint32(0x61746164); // "data"
+    function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+    function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
+
+    setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157);
+    setUint32(0x20746d66); setUint32(16); setUint16(1); setUint16(numOfChan);
+    setUint32(abuffer.sampleRate); setUint32(abuffer.sampleRate * 2 * numOfChan);
+    setUint16(numOfChan * 2); setUint16(16); setUint32(0x61746164);
     setUint32(length - pos - 4);
 
-    for(i = 0; i < abuffer.numberOfChannels; i++)
-    {
-      channels.push(abuffer.getChannelData(i));
-    }
-
-    while(pos < length)
-    {
-      for(i = 0; i < numOfChan; i++)
-      {
+    for(i = 0; i < abuffer.numberOfChannels; i++) channels.push(abuffer.getChannelData(i));
+    while(pos < length) {
+      for(i = 0; i < numOfChan; i++) {
         let sampleVal = channels[i][offset] || 0;
         sample = Math.max(-1, Math.min(1, sampleVal));
         sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
@@ -384,22 +451,10 @@
       offset++;
     }
     return buffer;
-
-    function setUint16(data)
-    {
-      view.setUint16(pos, data, true);
-      pos += 2;
-    }
-
-    function setUint32(data)
-    {
-      view.setUint32(pos, data, true);
-      pos += 4;
-    }
   }
 
   // Init
-  renderRows();
+  renderRows(false);
 </script>
 </body>
 </html>
