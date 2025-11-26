@@ -7,6 +7,9 @@
   --bg: #f4f7f6;
   --card: #ffffff;
   --text: #333;
+  --border: #dcdde1;
+  --highlight: #fab1a0;
+  --playing: #55efc4;
 }
 
 body {

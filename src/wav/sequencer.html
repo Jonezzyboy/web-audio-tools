@@ -3,11 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Notification Sequencer</title>
+  <title>Advanced Sequencer</title>
   <link rel="stylesheet" href="theme.css">
   <style>
-    /* Page-specific styles */
-    /* Global Controls */
+    /* VISUALIZER */
+    canvas {
+      width: 100%;
+      height: 80px;
+      background: #2d3436;
+      border-radius: 6px;
+      margin-bottom: 20px;
+      border: 1px solid var(--border);
+    }
+
+    /* CONTROLS */
     .global-controls {
       background: #f1f2f6;
       padding: 15px;
@@ -19,37 +28,59 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 10px;
+      margin-bottom: 12px;
     }
 
     .control-row label {
-      font-size: 0.85rem;
-      font-weight: 600;
-      width: 80px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      width: 70px;
     }
 
     .control-row input[type=range] {
       flex: 1;
       margin: 0 10px;
+      cursor: pointer;
     }
 
-    .val-display {
-      width: 50px;
+    /* Granular numeric inputs */
+    .num-input {
+      width: 60px;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
       text-align: right;
+      font-family: monospace;
     }
 
-    /* Sequencer List */
+    select.num-input {
+      width: 80px;
+    }
+
+    /* SEQUENCER LIST */
     .sequence-list {
       margin-bottom: 20px;
-      max-height: 250px;
+      max-height: 300px;
       overflow-y: auto;
+      border: 1px solid #eee;
+      border-radius: 6px;
+      padding: 5px;
     }
 
     .tone-row {
       display: flex;
       align-items: center;
-      margin-bottom: 8px;
-      animation: slideIn 0.2s ease-out;
+      padding: 8px;
+      border-bottom: 1px solid #f1f2f6;
+      transition: background 0.1s;
+      border-radius: 4px;
+    }
+
+    /* The Timeline Highlight Class */
+    .tone-row.is-playing {
+      background-color: var(--playing);
+      border-left: 4px solid #00b894;
+      font-weight: bold;
     }
 
     .tone-row span {
@@ -65,11 +96,10 @@
       border: 1px solid #dfe6e9;
       border-radius: 6px;
       font-size: 0.9rem;
-      width: 60px;
+      margin-right: 10px;
     }
 
     .tone-row button {
-      margin-left: 10px;
       background: transparent;
       color: var(--danger);
       border: 1px solid var(--danger);
@@ -84,7 +114,7 @@
       color: white;
     }
 
-    /* Buttons */
+    /* ACTION AREA */
     .action-area {
       display: grid;
       gap: 10px;
@@ -126,30 +156,42 @@
 <div class="container">
   <h1>Tone Sequencer</h1>
 
+  <canvas id="visualizer" width="500" height="100"></canvas>
+
   <div class="global-controls">
     <div class="control-row">
-      <label>Speed</label>
-      <input type="range" id="speed" min="50" max="500" value="120">
-      <span id="speedVal" class="val-display">120ms</span>
+      <label>Speed (ms)</label>
+      <input type="range" id="speedRange" min="50" max="1000" value="120">
+      <input type="number" id="speedNum" class="num-input" value="120">
     </div>
+
     <div class="control-row">
-      <label>Base Freq</label>
-      <input type="range" id="baseFreq" min="200" max="800" value="440">
-      <span id="freqVal" class="val-display">440Hz</span>
+      <label>Base (Hz)</label>
+      <input type="range" id="freqRange" min="50" max="1000" value="440">
+      <input type="number" id="freqNum" class="num-input" value="440">
     </div>
+
     <div class="control-row">
       <label>Decay</label>
-      <input type="range" id="decay" min="1" max="5" value="2">
-      <span id="decayVal" class="val-display">Med</span>
+      <input type="range" id="decayRange" min="1" max="10" step="0.1" value="2">
+      <input type="number" id="decayNum" class="num-input" value="2" step="0.1">
+    </div>
+
+    <div class="control-row">
+      <label>Wave</label>
+      <select id="waveType" class="num-input">
+        <option value="sine">Sine</option>
+        <option value="square">Square</option>
+        <option value="sawtooth">Saw</option>
+        <option value="triangle">Tri</option>
+      </select>
     </div>
   </div>
 
-  <div id="sequenceContainer" class="sequence-list">
-  </div>
+  <div id="sequenceContainer" class="sequence-list"></div>
 
   <div class="action-area">
     <button class="add-btn" id="addToneBtn">+ Add Tone Step</button>
-
     <div class="main-btns">
       <button class="btn-primary" id="playBtn">▶ Play</button>
       <button class="btn-primary btn-secondary" id="downloadBtn">⬇ WAV</button>
@@ -158,25 +200,45 @@
 </div>
 
 <script>
-  // --- STATE MANAGEMENT ---
-  // Default: A Major Triad (Root, Major 3rd, Perfect 5th)
-  let sequence = [1.0, 1.25, 1.5];
+  // --- STATE ---
+  let sequence = [1.0, 1.25, 1.5]; // Default Triad
+  let audioCtx = null;
+  let isPlaying = false;
+  let animationId = null;
+  let scheduledEvents = []; // For timeline tracking
 
   const els = {
     container: document.getElementById('sequenceContainer'),
-    speed:     document.getElementById('speed'),
-    baseFreq:  document.getElementById('baseFreq'),
-    decay:     document.getElementById('decay'),
-    addBtn:    document.getElementById('addToneBtn'),
-    playBtn:   document.getElementById('playBtn'),
-    dlBtn:     document.getElementById('downloadBtn'),
-    // Displays
-    dSpeed: document.getElementById('speedVal'),
-    dFreq:  document.getElementById('freqVal'),
-    dDecay: document.getElementById('decayVal')
+    // Ranges
+    speedR: document.getElementById('speedRange'),
+    freqR:  document.getElementById('freqRange'),
+    decayR: document.getElementById('decayRange'),
+    // Numbers
+    speedN: document.getElementById('speedNum'),
+    freqN:  document.getElementById('freqNum'),
+    decayN: document.getElementById('decayNum'),
+    wave:   document.getElementById('waveType'),
+    // Buttons
+    addBtn:  document.getElementById('addToneBtn'),
+    playBtn: document.getElementById('playBtn'),
+    dlBtn:   document.getElementById('downloadBtn'),
+    // Visuals
+    canvas: document.getElementById('visualizer')
   };
+  const canvasCtx = els.canvas.getContext('2d');
 
-  // --- RENDER UI ---
+  // --- SYNC INPUTS (Granular Controls) ---
+  function linkInputs(range, num)
+  {
+    range.addEventListener('input', () => num.value = range.value);
+    num.addEventListener('input', () => range.value = num.value);
+  }
+
+  linkInputs(els.speedR, els.speedN);
+  linkInputs(els.freqR, els.freqN);
+  linkInputs(els.decayR, els.decayN);
+
+  // --- UI RENDER ---
   function renderRows()
   {
     els.container.innerHTML = '';
@@ -184,6 +246,7 @@
     {
       const row = document.createElement('div');
       row.className = 'tone-row';
+      row.id = `row-${index}`; // Needed for timeline lookup
 
       const label = document.createElement('span');
       label.innerText = `#${index + 1}`;
@@ -192,13 +255,18 @@
       input.type = 'number';
       input.step = '0.01';
       input.value = multiplier;
-      input.onchange = (e) => { sequence[index] = parseFloat(e.target.value); };
+      input.onchange = (e) => sequence[index] = parseFloat(e.target.value);
 
       const delBtn = document.createElement('button');
       delBtn.innerText = '✕';
-      delBtn.onclick = () => removeTone(index);
-
-      // Disable delete if only 1 tone left
+      delBtn.onclick = () =>
+      {
+        if(sequence.length > 1)
+        {
+          sequence.splice(index, 1);
+          renderRows();
+        }
+      };
       if(sequence.length <= 1)
       {
         delBtn.disabled = true;
@@ -211,153 +279,234 @@
     });
   }
 
-  // --- ACTIONS ---
-  function addTone()
+  els.addBtn.addEventListener('click', () =>
   {
-    // Determine smart default: duplicate last tone or 1.0
-    const last = sequence[sequence.length - 1] || 1.0;
-    sequence.push(last);
+    sequence.push(sequence[sequence.length - 1] || 1.0);
     renderRows();
-  }
+  });
 
-  function removeTone(index)
+  // --- AUDIO & TIMELINE LOGIC ---
+
+  // Generate Audio Graph
+  function scheduleAudio(ctx, destination, startTime, isLivePlayback)
   {
-    if(sequence.length > 1)
-    {
-      sequence.splice(index, 1);
-      renderRows();
-    }
-  }
+    const baseFreq = parseFloat(els.freqN.value);
+    const speedSeconds = parseFloat(els.speedN.value) / 1000;
+    const decaySetting = parseFloat(els.decayN.value) * 0.1;
+    const waveType = els.wave.value;
 
-  // Update Global Display Labels
-  const updateLabels = () =>
-  {
-    els.dSpeed.innerText = els.speed.value + 'ms';
-    els.dFreq.innerText = els.baseFreq.value + 'Hz';
-    const decayMap = ['Zip', 'Tight', 'Med', 'Long', 'Ring'];
-    els.dDecay.innerText = decayMap[parseInt(els.decay.value) - 1];
-  };
+    scheduledEvents = []; // Reset timeline tracker
 
-  [els.speed, els.baseFreq, els.decay].forEach(el => el.addEventListener('input', updateLabels));
-
-  // --- AUDIO ENGINE ---
-  function runAudioSequence(ctx, destination, startTime)
-  {
-    const baseFreq = parseInt(els.baseFreq.value);
-    const speedSeconds = parseInt(els.speed.value) / 1000;
-    const decaySetting = parseInt(els.decay.value) * 0.1; // Scale 0.1 to 0.5
+    // Master Gain for visualizer hookup
+    const masterGain = ctx.createGain();
+    masterGain.connect(destination);
+    masterGain.gain.value = 0.5; // Avoid clipping
 
     let currentTime = startTime;
 
-    sequence.forEach(multiplier =>
+    sequence.forEach((multiplier, index) =>
     {
       const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      const noteGain = ctx.createGain();
 
-      osc.type = 'sine';
+      osc.type = waveType;
       osc.frequency.setValueAtTime(baseFreq * multiplier, currentTime);
 
       // Envelope
-      gain.gain.setValueAtTime(0, currentTime);
-      gain.gain.linearRampToValueAtTime(0.1, currentTime + 0.01); // Attack
-      gain.gain.exponentialRampToValueAtTime(0.001, currentTime + decaySetting + 0.1); // Decay
+      noteGain.gain.setValueAtTime(0, currentTime);
+      noteGain.gain.linearRampToValueAtTime(1, currentTime + 0.01);
+      noteGain.gain.exponentialRampToValueAtTime(0.001, currentTime + decaySetting + 0.1);
 
-      osc.connect(gain);
-      gain.connect(destination);
+      osc.connect(noteGain);
+      noteGain.connect(masterGain);
 
+      const duration = decaySetting + 0.2;
       osc.start(currentTime);
-      osc.stop(currentTime + decaySetting + 0.2);
+      osc.stop(currentTime + duration);
 
-      // Advance time for next note
+      // Store timeline data
+      if(isLivePlayback)
+      {
+        scheduledEvents.push({
+          index: index,
+          start: currentTime,
+          end:   currentTime + speedSeconds
+        });
+      }
+
       currentTime += speedSeconds;
     });
 
-    return currentTime; // Return end time
+    return {endTime: currentTime + 0.5, masterNode: masterGain};
   }
 
-  // --- PLAYBACK HANDLERS ---
-  els.addBtn.addEventListener('click', addTone);
+  // --- VISUALIZER & TIMELINE LOOP ---
+  function startVisualizer(analyser)
+  {
+    analyser.fftSize = 2048;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
 
+    function draw()
+    {
+      if(!isPlaying)
+      {
+        return;
+      }
+
+      animationId = requestAnimationFrame(draw);
+
+      // 1. Draw Waveform
+      analyser.getByteTimeDomainData(dataArray);
+      canvasCtx.fillStyle = 'rgb(45, 52, 54)';
+      canvasCtx.fillRect(0, 0, els.canvas.width, els.canvas.height);
+      canvasCtx.lineWidth = 2;
+      canvasCtx.strokeStyle = 'rgb(85, 239, 196)'; // Neon Green
+      canvasCtx.beginPath();
+
+      const sliceWidth = els.canvas.width * 1.0 / bufferLength;
+      let x = 0;
+
+      for(let i = 0; i < bufferLength; i++)
+      {
+        const v = dataArray[i] / 128.0;
+        const y = v * els.canvas.height / 2;
+        if(i === 0)
+        {
+          canvasCtx.moveTo(x, y);
+        }
+        else
+        {
+          canvasCtx.lineTo(x, y);
+        }
+        x += sliceWidth;
+      }
+      canvasCtx.lineTo(els.canvas.width, els.canvas.height / 2);
+      canvasCtx.stroke();
+
+      // 2. Update Timeline (Highlight Rows)
+      const now = audioCtx.currentTime;
+
+      // Clear all highlights
+      document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
+
+      // Find active note
+      const activeEvent = scheduledEvents.find(e => now >= e.start && now < e.end);
+      if(activeEvent)
+      {
+        const row = document.getElementById(`row-${activeEvent.index}`);
+        if(row)
+        {
+          row.classList.add('is-playing');
+          // Optional: Scroll to view
+          row.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        }
+      }
+    }
+
+    draw();
+  }
+
+  // --- PLAYBACK ---
   els.playBtn.addEventListener('click', () =>
   {
+    if(isPlaying)
+    {
+      return;
+    } // Prevent double click
+
     const AudioContext = window.AudioContext || window.webkitAudioContext;
-    const ctx = new AudioContext();
-    runAudioSequence(ctx, ctx.destination, ctx.currentTime);
+    audioCtx = new AudioContext();
+    isPlaying = true;
+    els.playBtn.disabled = true;
+
+    // Create Analyser
+    const analyser = audioCtx.createAnalyser();
+
+    // Schedule Audio
+    const {endTime, masterNode} = scheduleAudio(audioCtx, analyser, audioCtx.currentTime + 0.1, true);
+
+    // Connect to speakers
+    analyser.connect(audioCtx.destination);
+
+    // Start Loops
+    startVisualizer(analyser);
+
+    // Cleanup when done
+    const totalDuration = (endTime - audioCtx.currentTime) * 1000;
+    setTimeout(() =>
+    {
+      isPlaying = false;
+      els.playBtn.disabled = false;
+      cancelAnimationFrame(animationId);
+      // Clear final highlight
+      document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
+      audioCtx.close();
+    }, totalDuration);
   });
 
+  // --- DOWNLOAD ---
   els.dlBtn.addEventListener('click', async () =>
   {
     const originalText = els.dlBtn.innerText;
-    els.dlBtn.innerText = '...';
+    els.dlBtn.innerText = 'Render...';
 
-    const duration = (sequence.length * (parseInt(els.speed.value) / 1000)) + 1.0;
+    const speedVal = parseFloat(els.speedN.value) / 1000;
+    const duration = (sequence.length * speedVal) + 2.0;
     const sampleRate = 44100;
-    const ctx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
 
-    runAudioSequence(ctx, ctx.destination, 0.1);
+    const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
 
-    const renderedBuffer = await ctx.startRendering();
+    scheduleAudio(offlineCtx, offlineCtx.destination, 0.1, false);
 
-    // UPDATED CALL: No longer need to pass '0.0' or 'duration'
+    const renderedBuffer = await offlineCtx.startRendering();
     const wavBytes = bufferToWave(renderedBuffer);
-
     const blob = new Blob([wavBytes], {type: 'audio/wav'});
 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.style.display = 'none';
     a.href = url;
-    a.download = 'custom-sequence.wav';
-    document.body.appendChild(a);
+    a.download = 'sequencer_output.wav';
     a.click();
     window.URL.revokeObjectURL(url);
     els.dlBtn.innerText = originalText;
   });
 
-  // --- WAV HELPER (FIXED) ---
+  // --- WAV ENCODER UTILITY ---
   function bufferToWave(abuffer)
   {
     let numOfChan = abuffer.numberOfChannels,
-      // Calculate length based on the buffer's actual sample count
       length = abuffer.length * numOfChan * 2 + 44,
       buffer = new ArrayBuffer(length),
       view = new DataView(buffer),
       channels = [], i, sample,
-      offset = 0,
-      pos = 0;
+      offset = 0, pos = 0;
 
-    // Write WAVE Header
-    setUint32(0x46464952);                         // "RIFF"
-    setUint32(length - 8);                         // file length - 8
-    setUint32(0x45564157);                         // "WAVE"
-
-    setUint32(0x20746d66);                         // "fmt " chunk
-    setUint32(16);                                 // length = 16
-    setUint16(1);                                  // PCM (uncompressed)
+    // Header
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8);
+    setUint32(0x45564157); // "WAVE"
+    setUint32(0x20746d66); // "fmt "
+    setUint32(16);
+    setUint16(1); // PCM
     setUint16(numOfChan);
     setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2);                      // block-align
-    setUint16(16);                                 // 16-bit
+    setUint32(abuffer.sampleRate * 2 * numOfChan);
+    setUint16(numOfChan * 2);
+    setUint16(16);
+    setUint32(0x61746164); // "data"
+    setUint32(length - pos - 4);
 
-    setUint32(0x61746164);                         // "data" - chunk
-    setUint32(length - pos - 4);                   // chunk length
-
-    // Get Channel Data
     for(i = 0; i < abuffer.numberOfChannels; i++)
     {
       channels.push(abuffer.getChannelData(i));
     }
 
-    // Write Interleaved Data
     while(pos < length)
     {
       for(i = 0; i < numOfChan; i++)
       {
-        // SAFEGUARD: Ensure we don't read past the end of the array
-        // If data exists use it, otherwise use 0 (silence)
-        let sampleVal = channels[i][offset] ? channels[i][offset] : 0;
-
+        let sampleVal = channels[i][offset] || 0;
         sample = Math.max(-1, Math.min(1, sampleVal));
         sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
         view.setInt16(pos, sample, true);
@@ -365,7 +514,6 @@
       }
       offset++;
     }
-
     return buffer;
 
     function setUint16(data)
@@ -383,8 +531,6 @@
 
   // Init
   renderRows();
-  updateLabels();
-
 </script>
 </body>
 </html>
