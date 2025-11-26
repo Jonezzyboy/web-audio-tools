@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WAV to MP3 Converter</title>
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+
+    .card {
+      background: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      width: 350px;
+    }
+
+    h1 {
+      margin-top: 0;
+      color: #333;
+      font-size: 1.5rem;
+    }
+
+    .drop-zone {
+      border: 2px dashed #ccc;
+      padding: 30px;
+      border-radius: 8px;
+      margin: 20px 0;
+      transition: all 0.2s;
+      cursor: pointer;
+      background: #fafafa;
+    }
+
+    .drop-zone:hover, .drop-zone.dragover {
+      border-color: #007bff;
+      background: #eef6ff;
+    }
+
+    .drop-zone p {
+      margin: 0;
+      color: #666;
+      font-size: 0.9rem;
+      pointer-events: none;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    #status {
+      margin-top: 15px;
+      font-weight: bold;
+      font-size: 0.9rem;
+      min-height: 1.2em;
+    }
+
+    .success {
+      color: #28a745;
+    }
+
+    .error {
+      color: #dc3545;
+    }
+
+    .processing {
+      color: #007bff;
+    }
+
+    /* Spinner */
+    .loader {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #007bff;
+      border-radius: 50%;
+      width: 20px;
+      height: 20px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+      display: none;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>WAV to MP3</h1>
+
+  <div class="drop-zone" id="dropZone">
+    <p>Drag & Drop WAV file here<br>or click to browse</p>
+  </div>
+  <input type="file" id="fileInput" accept="audio/wav, audio/x-wav">
+
+  <div id="status"></div>
+</div>
+
+<script>
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const status = document.getElementById('status');
+
+  // --- UI Handling ---
+  dropZone.addEventListener('click', () => fileInput.click());
+
+  dropZone.addEventListener('dragover', (e) =>
+  {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+
+  dropZone.addEventListener('drop', (e) =>
+  {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if(e.dataTransfer.files.length)
+    {
+      handleFile(e.dataTransfer.files[0]);
+    }
+  });
+
+  fileInput.addEventListener('change', (e) =>
+  {
+    if(e.target.files.length)
+    {
+      handleFile(e.target.files[0]);
+    }
+  });
+
+  // --- Conversion Logic ---
+  async function handleFile(file)
+  {
+    if(!file.type.includes('wav') && !file.name.endsWith('.wav'))
+    {
+      showStatus('Error: Please upload a WAV file.', 'error');
+      return;
+    }
+
+    showStatus('<div class="loader" style="display:inline-block"></div>Converting...', 'processing');
+
+    try
+    {
+      const arrayBuffer = await file.arrayBuffer();
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+      // Start MP3 encoding
+      const mp3Blob = convertBufferToMp3(audioBuffer);
+
+      // Trigger Download
+      const url = URL.createObjectURL(mp3Blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = url;
+      a.download = file.name.replace('.wav', '.mp3');
+      document.body.appendChild(a);
+      a.click();
+
+      showStatus('Success! Download started.', 'success');
+
+      // Cleanup
+      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+      audioCtx.close();
+
+    }
+    catch(err)
+    {
+      console.error(err);
+      showStatus('Error converting file. See console.', 'error');
+    }
+  }
+
+  function showStatus(msg, type)
+  {
+    status.innerHTML = msg;
+    status.className = type;
+  }
+
+  // --- THE LAMEJS ENCODER HELPER ---
+  function convertBufferToMp3(buffer)
+  {
+    const channels = 1; // Force Mono for notifications (smaller file size)
+    const sampleRate = buffer.sampleRate;
+    const kbps = 128; // Standard quality
+
+    const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
+    const mp3Data = [];
+
+    // Get the Left Channel (Mono source usually identical on L/R)
+    const samples = buffer.getChannelData(0);
+
+    // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+    // LAME requires Integer PCM input
+    const sampleBlockSize = 1152; // multiple of 576
+    const mp3Samples = new Int16Array(samples.length);
+
+    for(let i = 0; i < samples.length; i++)
+    {
+      // Clamp values between -1 and 1 then scale
+      let s = Math.max(-1, Math.min(1, samples[i]));
+      mp3Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+
+    // Encode in chunks
+    for(let i = 0; i < mp3Samples.length; i += sampleBlockSize)
+    {
+      const chunk = mp3Samples.subarray(i, i + sampleBlockSize);
+      const mp3buf = mp3encoder.encodeBuffer(chunk);
+      if(mp3buf.length > 0)
+      {
+        mp3Data.push(mp3buf);
+      }
+    }
+
+    // Finish
+    const mp3buf = mp3encoder.flush();
+    if(mp3buf.length > 0)
+    {
+      mp3Data.push(mp3buf);
+    }
+
+    return new Blob(mp3Data, {type: 'audio/mp3'});
+  }
+</script>
+
+</body>
+</html>
