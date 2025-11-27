@@ -1,0 +1,15 @@
+{
+  "name": "web-audio-tools",
+  "version": "1.0.0",
+  "description": "Collection of web audio tools",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "Alan Jones",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}
