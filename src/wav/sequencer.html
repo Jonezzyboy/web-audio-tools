@@ -42,6 +42,22 @@
       margin-top: 2px;
       white-space: nowrap;
     }
+
+    .loop-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      color: #636e72;
+      cursor: pointer;
+      justify-content: center;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
   </style>
 </head>
 <body>
@@ -49,6 +65,7 @@
 <div id="cursorLayer"></div>
 
 <div class="container" id="appContainer">
+  <a class="back-link" href="../index.html">← All tools</a>
   <h1>Tone Sequencer <span id="connectionStatus" style="font-size:0.5em; color:#b2bec3;">(Offline)</span></h1>
 
   <canvas id="visualizer" class="viz-canvas" width="500" height="100"></canvas>
@@ -83,14 +100,26 @@
     </div>
   </div>
 
+  <div class="preset-row" style="margin-bottom: 15px;">
+    <button class="preset-btn" data-preset="arpeggio">Arpeggio</button>
+    <button class="preset-btn" data-preset="doorbell">Doorbell</button>
+    <button class="preset-btn" data-preset="alarm">Alarm</button>
+    <button class="preset-btn" data-preset="powerup">Power Up</button>
+    <button class="preset-btn" data-preset="descend">Descend</button>
+  </div>
+
   <div id="sequenceContainer" class="sequence-list"></div>
 
   <div class="action-area">
     <button class="add-btn" id="addToneBtn">+ Add Tone Step</button>
     <div class="main-btns">
       <button class="btn-primary" id="playBtn">▶ Play</button>
+      <button class="btn-primary btn-secondary" id="stopBtn" disabled>■ Stop</button>
       <button class="btn-primary btn-secondary" id="downloadBtn">⬇ WAV</button>
     </div>
+    <label class="loop-toggle">
+      <input type="checkbox" id="loopToggle"> Loop playback
+    </label>
   </div>
 </div>
 
@@ -103,10 +132,13 @@
   let scheduledEvents = [];
 
   // --- WEBSOCKET SETUP ---
-  // Connect to local server (see Node.js snippet below)
-  const ws = new WebSocket('ws://localhost:8080');
+  // Same host/port as the page when served over HTTP; localhost fallback for file://
+  const WS_URL = location.protocol.startsWith('http')
+    ? `ws://${location.host}`
+    : 'ws://localhost:8080';
+  let ws = null;
   const myId = Math.random().toString(36).substr(2, 9);
-  const myColor = '#' + Math.floor(Math.random()*16777215).toString(16);
+  const myColor = '#' + Math.floor(Math.random() * 0x1000000).toString(16).padStart(6, '0');
 
   const els = {
     container: document.getElementById('sequenceContainer'),
@@ -122,6 +154,8 @@
     wave:      document.getElementById('waveType'),
     addBtn:    document.getElementById('addToneBtn'),
     playBtn:   document.getElementById('playBtn'),
+    stopBtn:   document.getElementById('stopBtn'),
+    loop:      document.getElementById('loopToggle'),
     dlBtn:     document.getElementById('downloadBtn'),
     canvas:    document.getElementById('visualizer')
   };
@@ -129,35 +163,51 @@
 
   // --- WEBSOCKET HANDLERS ---
 
-  ws.onopen = () => {
-    els.status.innerText = '(Connected)';
-    els.status.style.color = 'green';
-    // Send initial "hello"
-    sendMsg({ type: 'join', color: myColor });
-  };
+  function connectWs() {
+    ws = new WebSocket(WS_URL);
 
-  ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
+    ws.onopen = () => {
+      els.status.innerText = '(Connected)';
+      els.status.style.color = 'green';
+      // Send initial "hello"
+      sendMsg({ type: 'join', color: myColor });
+    };
 
-    // Ignore messages from self
-    if (msg.id === myId) return;
+    ws.onmessage = (event) => {
+      let msg;
+      try {
+        msg = JSON.parse(event.data);
+      } catch {
+        return;
+      }
 
-    switch (msg.type) {
-      case 'state_update':
-        // Update local state without triggering another send
-        updateStateFromRemote(msg.data);
-        break;
-      case 'cursor_move':
-        updateRemoteCursor(msg.id, msg.x, msg.y, msg.color);
-        break;
-      case 'client_left':
-        removeCursor(msg.id);
-        break;
-    }
-  };
+      // Ignore messages from self
+      if (msg.id === myId) return;
+
+      switch (msg.type) {
+        case 'state_update':
+          // Update local state without triggering another send
+          updateStateFromRemote(msg.data);
+          break;
+        case 'cursor_move':
+          updateRemoteCursor(msg.id, msg.x, msg.y, msg.color);
+          break;
+        case 'client_left':
+          removeCursor(msg.id);
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      els.status.innerText = '(Offline)';
+      els.status.style.color = '#b2bec3';
+      setTimeout(connectWs, 3000); // Auto-reconnect
+    };
+  }
+  connectWs();
 
   function sendMsg(payload) {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       payload.id = myId;
       ws.send(JSON.stringify(payload));
     }
@@ -178,8 +228,13 @@
 
   // --- CURSOR LOGIC ---
 
+  let lastCursorSent = 0;
   document.addEventListener('mousemove', (e) => {
-    // Throttle slightly in production, raw here for simplicity
+    // Throttle to ~20 updates/sec to avoid flooding the socket
+    const now = performance.now();
+    if (now - lastCursorSent < 50) return;
+    lastCursorSent = now;
+
     sendMsg({
       type: 'cursor_move',
       x: e.pageX,
@@ -264,8 +319,14 @@
       input.value = multiplier;
       // When a user changes a note
       input.onchange = (e) => {
-        sequence[index] = parseFloat(e.target.value);
-        broadcastState();
+        const v = parseFloat(e.target.value);
+        if (Number.isFinite(v) && v > 0) {
+          sequence[index] = v;
+          broadcastState();
+        } else {
+          // Reject empty/invalid input — NaN would break the audio scheduler
+          e.target.value = sequence[index];
+        }
       };
 
       const delBtn = document.createElement('button');
@@ -292,11 +353,44 @@
     renderRows();
   });
 
-  // --- AUDIO ENGINE (Unchanged from previous version) ---
+  // --- PRESETS / DEMOS ---
+  // Multipliers are relative to the base frequency
+  const PRESETS = {
+    arpeggio: {sequence: [1, 1.25, 1.5, 2],                speed: 120, freq: 440, decay: 2, wave: 'sine'},
+    doorbell: {sequence: [1.25, 1],                        speed: 400, freq: 660, decay: 8, wave: 'sine'},
+    alarm:    {sequence: [1, 1.5, 1, 1.5, 1, 1.5],         speed: 150, freq: 880, decay: 1, wave: 'square'},
+    powerup:  {sequence: [1, 1.2, 1.5, 1.8, 2.2, 2.7],     speed: 80,  freq: 330, decay: 1, wave: 'triangle'},
+    descend:  {sequence: [2, 1.78, 1.5, 1.33, 1],          speed: 250, freq: 440, decay: 4, wave: 'sawtooth'}
+  };
+
+  function applyPreset(name) {
+    const p = PRESETS[name];
+    sequence = [...p.sequence];
+    els.speedN.value = els.speedR.value = p.speed;
+    els.freqN.value = els.freqR.value = p.freq;
+    els.decayN.value = els.decayR.value = p.decay;
+    els.wave.value = p.wave;
+
+    if(isPlaying) stopPlayback();
+    renderRows(); // Re-render + broadcast to collaborators
+    els.playBtn.click(); // Auto-preview
+  }
+
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
+  });
+
+  // NaN-safe parse: number inputs can be cleared mid-edit
+  function num(value, fallback) {
+    const v = parseFloat(value);
+    return Number.isFinite(v) && v > 0 ? v : fallback;
+  }
+
+  // --- AUDIO ENGINE ---
   function scheduleAudio(ctx, destination, startTime, isLivePlayback) {
-    const baseFreq = parseFloat(els.freqN.value);
-    const speedSeconds = parseFloat(els.speedN.value) / 1000;
-    const decaySetting = parseFloat(els.decayN.value) * 0.1;
+    const baseFreq = num(els.freqN.value, 440);
+    const speedSeconds = num(els.speedN.value, 120) / 1000;
+    const decaySetting = num(els.decayN.value, 2) * 0.1;
     const waveType = els.wave.value;
 
     scheduledEvents = [];
@@ -381,46 +475,72 @@
   }
 
   // --- PLAYBACK HANDLERS ---
+  let playTimeout = null;
+
+  function stopPlayback() {
+    isPlaying = false;
+    clearTimeout(playTimeout);
+    cancelAnimationFrame(animationId);
+    document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
+    els.playBtn.disabled = false;
+    els.stopBtn.disabled = true;
+    if(audioCtx) {
+      audioCtx.close();
+      audioCtx = null;
+    }
+  }
+
+  function playOnce(analyser) {
+    const {endTime} = scheduleAudio(audioCtx, analyser, audioCtx.currentTime + 0.1, true);
+    const totalDuration = (endTime - audioCtx.currentTime) * 1000;
+    playTimeout = setTimeout(() => {
+      if(isPlaying && els.loop.checked) {
+        playOnce(analyser); // Loop: schedule the next pass
+      } else {
+        stopPlayback();
+      }
+    }, totalDuration);
+  }
+
   els.playBtn.addEventListener('click', () => {
     if(isPlaying) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AudioContext();
     isPlaying = true;
     els.playBtn.disabled = true;
+    els.stopBtn.disabled = false;
 
     const analyser = audioCtx.createAnalyser();
-    const {endTime} = scheduleAudio(audioCtx, analyser, audioCtx.currentTime + 0.1, true);
     analyser.connect(audioCtx.destination);
     startVisualizer(analyser);
-
-    const totalDuration = (endTime - audioCtx.currentTime) * 1000;
-    setTimeout(() => {
-      isPlaying = false;
-      els.playBtn.disabled = false;
-      cancelAnimationFrame(animationId);
-      document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
-      audioCtx.close();
-    }, totalDuration);
+    playOnce(analyser);
   });
+
+  els.stopBtn.addEventListener('click', stopPlayback);
 
   els.dlBtn.addEventListener('click', async () => {
     const originalText = els.dlBtn.innerText;
     els.dlBtn.innerText = 'Render...';
-    const speedVal = parseFloat(els.speedN.value) / 1000;
-    const duration = (sequence.length * speedVal) + 2.0;
-    const sampleRate = 44100;
-    const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
-    scheduleAudio(offlineCtx, offlineCtx.destination, 0.1, false);
-    const renderedBuffer = await offlineCtx.startRendering();
-    const wavBytes = bufferToWave(renderedBuffer);
-    const blob = new Blob([wavBytes], {type: 'audio/wav'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'sequencer_output.wav';
-    a.click();
-    window.URL.revokeObjectURL(url);
-    els.dlBtn.innerText = originalText;
+    try {
+      const speedVal = num(els.speedN.value, 120) / 1000;
+      const duration = (sequence.length * speedVal) + 2.0;
+      const sampleRate = 44100;
+      const offlineCtx = new OfflineAudioContext(1, sampleRate * duration, sampleRate);
+      scheduleAudio(offlineCtx, offlineCtx.destination, 0.1, false);
+      const renderedBuffer = await offlineCtx.startRendering();
+      const wavBytes = bufferToWave(renderedBuffer);
+      const blob = new Blob([wavBytes], {type: 'audio/wav'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'sequencer_output.wav';
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch(err) {
+      console.error(err);
+    } finally {
+      els.dlBtn.innerText = originalText;
+    }
   });
 
   function bufferToWave(abuffer) {
@@ -444,7 +564,7 @@
       for(i = 0; i < numOfChan; i++) {
         let sampleVal = channels[i][offset] || 0;
         sample = Math.max(-1, Math.min(1, sampleVal));
-        sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767) | 0;
+        sample = Math.round(sample < 0 ? sample * 32768 : sample * 32767);
         view.setInt16(pos, sample, true);
         pos += 2;
       }

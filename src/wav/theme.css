@@ -40,6 +40,42 @@ h1 {
   color: var(--primary);
 }
 
+/* Back-to-home navigation link (top of each tool page) */
+.back-link {
+  display: inline-block;
+  font-size: 0.85rem;
+  color: #888;
+  text-decoration: none;
+  margin-bottom: 0.75rem;
+}
+
+.back-link:hover {
+  color: var(--primary);
+}
+
+/* Preset button rows (generator + sequencer) */
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preset-btn {
+  flex: 1;
+  min-width: 70px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.preset-btn:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
 button {
   padding: 12px;
   border: none;

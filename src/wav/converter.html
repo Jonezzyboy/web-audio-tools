@@ -38,6 +38,21 @@
       display: none;
     }
 
+    .options-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+    }
+
+    .options-row select {
+      padding: 6px;
+      border: 1px solid #dcdde1;
+      border-radius: 4px;
+      font-family: monospace;
+    }
+
     #status {
       margin-top: 15px;
       font-weight: bold;
@@ -84,12 +99,23 @@
 <body>
 
 <div class="card">
+  <a class="back-link" href="../index.html">← All tools</a>
   <h1>WAV to MP3</h1>
 
   <div class="drop-zone" id="dropZone">
-    <p>Drag & Drop WAV file here<br>or click to browse</p>
+    <p>Drag & Drop WAV files here<br>or click to browse</p>
   </div>
-  <input type="file" id="fileInput" accept="audio/wav, audio/x-wav">
+  <input type="file" id="fileInput" accept="audio/wav, audio/x-wav" multiple>
+
+  <div class="options-row">
+    <label for="bitrate">MP3 Bitrate</label>
+    <select id="bitrate">
+      <option value="96">96 kbps</option>
+      <option value="128" selected>128 kbps</option>
+      <option value="192">192 kbps</option>
+      <option value="320">320 kbps</option>
+    </select>
+  </div>
 
   <div id="status"></div>
 </div>
@@ -116,7 +142,7 @@
     dropZone.classList.remove('dragover');
     if(e.dataTransfer.files.length)
     {
-      handleFile(e.dataTransfer.files[0]);
+      handleFiles(e.dataTransfer.files);
     }
   });
 
@@ -124,51 +150,72 @@
   {
     if(e.target.files.length)
     {
-      handleFile(e.target.files[0]);
+      handleFiles(e.target.files);
     }
+    // Reset so selecting the same file again re-fires 'change'
+    fileInput.value = '';
   });
 
   // --- Conversion Logic ---
-  async function handleFile(file)
+  function isWav(file)
   {
-    if(!file.type.includes('wav') && !file.name.endsWith('.wav'))
+    return file.type.includes('wav') || /\.wav$/i.test(file.name);
+  }
+
+  async function handleFiles(fileList)
+  {
+    const files = Array.from(fileList).filter(isWav);
+    if(!files.length)
     {
-      showStatus('Error: Please upload a WAV file.', 'error');
+      showStatus('Error: Please upload WAV files.', 'error');
       return;
     }
 
-    showStatus('<div class="loader" style="display:inline-block"></div>Converting...', 'processing');
+    const kbps = parseInt(document.getElementById('bitrate').value, 10);
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let converted = 0;
 
     try
     {
-      const arrayBuffer = await file.arrayBuffer();
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      for(const file of files)
+      {
+        showStatus(
+          `<div class="loader" style="display:inline-block"></div>Converting ${file.name} (${converted + 1}/${files.length})...`,
+          'processing'
+        );
 
-      // Start MP3 encoding
-      const mp3Blob = convertBufferToMp3(audioBuffer);
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        const mp3Blob = convertBufferToMp3(audioBuffer, kbps);
 
-      // Trigger Download
-      const url = URL.createObjectURL(mp3Blob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = file.name.replace('.wav', '.mp3');
-      document.body.appendChild(a);
-      a.click();
+        downloadBlob(mp3Blob, file.name.replace(/\.wav$/i, '') + '.mp3');
+        converted++;
+      }
 
-      showStatus('Success! Download started.', 'success');
-
-      // Cleanup
-      setTimeout(() => window.URL.revokeObjectURL(url), 1000);
-      audioCtx.close();
-
+      showStatus(`Success! Converted ${converted} file${converted > 1 ? 's' : ''}.`, 'success');
     }
     catch(err)
     {
       console.error(err);
-      showStatus('Error converting file. See console.', 'error');
+      showStatus(`Error converting file ${converted + 1} of ${files.length}. See console.`, 'error');
     }
+    finally
+    {
+      audioCtx.close();
+    }
+  }
+
+  function downloadBlob(blob, filename)
+  {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => window.URL.revokeObjectURL(url), 1000);
   }
 
   function showStatus(msg, type)
@@ -178,35 +225,36 @@
   }
 
   // --- THE LAMEJS ENCODER HELPER ---
-  function convertBufferToMp3(buffer)
+  // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
+  // LAME requires Integer PCM input
+  function floatTo16(samples)
   {
-    const channels = 1; // Force Mono for notifications (smaller file size)
-    const sampleRate = buffer.sampleRate;
-    const kbps = 128; // Standard quality
-
-    const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, kbps);
-    const mp3Data = [];
-
-    // Get the Left Channel (Mono source usually identical on L/R)
-    const samples = buffer.getChannelData(0);
-
-    // Convert Float32 (-1.0 to 1.0) to Int16 (-32768 to 32767)
-    // LAME requires Integer PCM input
-    const sampleBlockSize = 1152; // multiple of 576
-    const mp3Samples = new Int16Array(samples.length);
-
+    const out = new Int16Array(samples.length);
     for(let i = 0; i < samples.length; i++)
     {
-      // Clamp values between -1 and 1 then scale
-      let s = Math.max(-1, Math.min(1, samples[i]));
-      mp3Samples[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      const s = Math.max(-1, Math.min(1, samples[i]));
+      out[i] = Math.round(s < 0 ? s * 0x8000 : s * 0x7FFF);
     }
+    return out;
+  }
+
+  function convertBufferToMp3(buffer, kbps)
+  {
+    const channels = Math.min(2, buffer.numberOfChannels);
+    const mp3encoder = new lamejs.Mp3Encoder(channels, buffer.sampleRate, kbps);
+    const mp3Data = [];
+
+    const left = floatTo16(buffer.getChannelData(0));
+    const right = channels === 2 ? floatTo16(buffer.getChannelData(1)) : null;
 
     // Encode in chunks
-    for(let i = 0; i < mp3Samples.length; i += sampleBlockSize)
+    const sampleBlockSize = 1152; // multiple of 576
+    for(let i = 0; i < left.length; i += sampleBlockSize)
     {
-      const chunk = mp3Samples.subarray(i, i + sampleBlockSize);
-      const mp3buf = mp3encoder.encodeBuffer(chunk);
+      const leftChunk = left.subarray(i, i + sampleBlockSize);
+      const mp3buf = right
+        ? mp3encoder.encodeBuffer(leftChunk, right.subarray(i, i + sampleBlockSize))
+        : mp3encoder.encodeBuffer(leftChunk);
       if(mp3buf.length > 0)
       {
         mp3Data.push(mp3buf);

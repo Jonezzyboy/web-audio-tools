@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Web Audio Tools</title>
+  <link rel="stylesheet" href="wav/theme.css">
+  <style>
+    .tool-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .tool-link {
+      display: block;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      text-decoration: none;
+      color: var(--text);
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+    }
+
+    .tool-link:hover {
+      border-color: var(--primary);
+      box-shadow: 0 4px 10px rgba(108, 92, 231, 0.15);
+      transform: translateY(-1px);
+    }
+
+    .tool-link h2 {
+      margin: 0 0 4px;
+      font-size: 1rem;
+      color: var(--primary);
+    }
+
+    .tool-link p {
+      margin: 0;
+      font-size: 0.85rem;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>Web Audio Tools</h1>
+
+  <div class="tool-list">
+    <a class="tool-link" href="wav/generator.html">
+      <h2>🔔 Notification Designer</h2>
+      <p>Design two-tap notification sounds with pitch, harmony, speed and decay controls. Export as WAV.</p>
+    </a>
+
+    <a class="tool-link" href="wav/sequencer.html">
+      <h2>🎹 Tone Sequencer</h2>
+      <p>Build multi-step tone sequences — collaborative editing with live cursors when others are connected.</p>
+    </a>
+
+    <a class="tool-link" href="wav/converter.html">
+      <h2>🔄 WAV to MP3 Converter</h2>
+      <p>Convert WAV files to MP3 entirely in the browser. Stereo support, selectable bitrate, batch conversion.</p>
+    </a>
+  </div>
+</div>
+
+</body>
+</html>
