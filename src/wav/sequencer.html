@@ -72,6 +72,61 @@
       font-size: 0.8rem;
       color: #636e72;
     }
+
+    .users-panel {
+      max-width: 320px;
+      margin: 0 auto 14px;
+      padding: 10px 14px;
+      border: 1px solid var(--border, #dfe6e9);
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+
+    .users-title {
+      font-weight: 600;
+      color: #636e72;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+
+    .users-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .users-list li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+    }
+
+    .user-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .user-name { flex: 1; text-align: left; }
+
+    .kick-btn {
+      font-size: 0.75rem;
+      padding: 2px 10px;
+      border: 1px solid #d63031;
+      color: #d63031;
+      background: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .kick-btn:hover {
+      background: #d63031;
+      color: white;
+    }
   </style>
 </head>
 <body>
@@ -85,6 +140,11 @@
   <div class="collab-row" id="collabRow">
     <button class="preset-btn" id="collabBtn">Start a session</button>
     <span class="collab-hint" id="collabHint"></span>
+  </div>
+
+  <div class="users-panel" id="usersPanel" hidden>
+    <div class="users-title">In this session</div>
+    <ul class="users-list" id="usersList"></ul>
   </div>
 
   <canvas id="visualizer" class="viz-canvas" width="500" height="100"></canvas>
@@ -166,8 +226,17 @@
     }
     return room ? `wss://${RELAY_HOST}/room/${encodeURIComponent(room)}` : null;
   }
+  let isHost = false;
+  let wasKicked = false;
+  let lastRoster = [];
   const myId = Math.random().toString(36).substr(2, 9);
   const myColor = '#' + Math.floor(Math.random() * 0x1000000).toString(16).padStart(6, '0');
+
+  // The room creator keeps a secret key in localStorage; presenting it on join
+  // is what makes the relay treat this browser as the session host
+  function hostKeyFor(r) {
+    return localStorage.getItem('seqHostKey:' + r);
+  }
 
   const els = {
     container: document.getElementById('sequenceContainer'),
@@ -189,7 +258,9 @@
     canvas:    document.getElementById('visualizer'),
     collabRow: document.getElementById('collabRow'),
     collabBtn: document.getElementById('collabBtn'),
-    collabHint: document.getElementById('collabHint')
+    collabHint: document.getElementById('collabHint'),
+    usersPanel: document.getElementById('usersPanel'),
+    usersList: document.getElementById('usersList')
   };
   const canvasCtx = els.canvas.getContext('2d');
 
@@ -216,7 +287,7 @@
     ws.onopen = () => {
       setStatus('(Connected)', 'green');
       // Send initial "hello"
-      sendMsg({ type: 'join', color: myColor });
+      sendMsg({ type: 'join', color: myColor, hostKey: room ? hostKeyFor(room) : null });
     };
 
     ws.onmessage = (event) => {
@@ -241,10 +312,27 @@
         case 'client_left':
           removeCursor(msg.id);
           break;
+        case 'host_status':
+          isHost = msg.isHost;
+          renderUsers();
+          break;
+        case 'roster':
+          lastRoster = msg.users;
+          renderUsers();
+          break;
+        case 'kicked':
+          wasKicked = true;
+          break;
       }
     };
 
     ws.onclose = () => {
+      if (wasKicked) {
+        setStatus('(Removed by host)', '#d63031');
+        lastRoster = [];
+        renderUsers();
+        return; // No reconnect — the host asked us to leave
+      }
       setStatus('(Offline)', '#b2bec3');
       setTimeout(connectWs, 3000); // Auto-reconnect
     };
@@ -267,6 +355,7 @@
   els.collabBtn.addEventListener('click', async () => {
     if (!room) {
       room = Math.random().toString(36).slice(2, 8).toUpperCase();
+      localStorage.setItem('seqHostKey:' + room, Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
       location.hash = 'room=' + room;
       updateCollabUi();
       connectWs();
@@ -287,6 +376,42 @@
   });
 
   updateCollabUi();
+
+  // --- SESSION USERS (host view) ---
+
+  function renderUsers() {
+    const show = isHost && !IS_LOCAL && room && lastRoster.length > 0;
+    els.usersPanel.hidden = !show;
+    if (!show) return;
+
+    els.usersList.innerHTML = '';
+    lastRoster.forEach((user) => {
+      const li = document.createElement('li');
+
+      const dot = document.createElement('span');
+      dot.className = 'user-dot';
+      dot.style.background = user.color || '#b2bec3';
+
+      const label = document.createElement('span');
+      label.className = 'user-name';
+      label.innerText = 'User ' + user.id.substr(0, 4)
+        + (user.id === myId ? ' (you)' : '')
+        + (user.isHost ? ' · host' : '');
+
+      li.appendChild(dot);
+      li.appendChild(label);
+
+      if (user.id !== myId) {
+        const kickBtn = document.createElement('button');
+        kickBtn.className = 'kick-btn';
+        kickBtn.innerText = 'Kick';
+        kickBtn.onclick = () => sendMsg({ type: 'kick', targetId: user.id });
+        li.appendChild(kickBtn);
+      }
+
+      els.usersList.appendChild(li);
+    });
+  }
 
   function sendMsg(payload) {
     if (ws && ws.readyState === WebSocket.OPEN) {
