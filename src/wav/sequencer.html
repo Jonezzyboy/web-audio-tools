@@ -323,6 +323,13 @@
         case 'kicked':
           wasKicked = true;
           break;
+        case 'play':
+          remotePlay(msg.loop);
+          break;
+        case 'stop':
+          pendingRemotePlay = false;
+          if (isPlaying) stopPlayback();
+          break;
       }
     };
 
@@ -709,10 +716,11 @@
     }, totalDuration);
   }
 
-  els.playBtn.addEventListener('click', () => {
+  function startPlayback(shouldBroadcast = true) {
     if(isPlaying) return;
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     audioCtx = new AudioContext();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
     isPlaying = true;
     els.playBtn.disabled = true;
     els.stopBtn.disabled = false;
@@ -721,9 +729,37 @@
     analyser.connect(audioCtx.destination);
     startVisualizer(analyser);
     playOnce(analyser);
-  });
 
-  els.stopBtn.addEventListener('click', stopPlayback);
+    if (shouldBroadcast) sendMsg({ type: 'play', loop: els.loop.checked });
+  }
+
+  // A remote play restarts local playback so everyone follows the same
+  // schedule. Browsers block audio until the page has been interacted with,
+  // so first-time listeners may need a tap to join in.
+  let pendingRemotePlay = false;
+  function remotePlay(loop) {
+    if (typeof loop === 'boolean') els.loop.checked = loop;
+    if (isPlaying) stopPlayback();
+    startPlayback(false);
+    if (audioCtx && audioCtx.state === 'suspended') {
+      stopPlayback();
+      pendingRemotePlay = true;
+      setStatus('(Tap anywhere to hear the session)', '#e17055');
+      document.addEventListener('pointerdown', () => {
+        if (!pendingRemotePlay) return;
+        pendingRemotePlay = false;
+        setStatus('(Connected)', 'green');
+        startPlayback(false);
+      }, { once: true });
+    }
+  }
+
+  els.playBtn.addEventListener('click', () => startPlayback());
+
+  els.stopBtn.addEventListener('click', () => {
+    sendMsg({ type: 'stop' });
+    stopPlayback();
+  });
 
   els.dlBtn.addEventListener('click', async () => {
     const originalText = els.dlBtn.innerText;
