@@ -58,6 +58,20 @@
       cursor: not-allowed;
       transform: none !important;
     }
+
+    .collab-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .collab-hint {
+      font-size: 0.8rem;
+      color: #636e72;
+    }
   </style>
 </head>
 <body>
@@ -67,6 +81,11 @@
 <div class="container" id="appContainer">
   <a class="back-link" href="../index.html">← All tools</a>
   <h1>Tone Sequencer <span id="connectionStatus" style="font-size:0.5em; color:#b2bec3;">(Offline)</span></h1>
+
+  <div class="collab-row" id="collabRow">
+    <button class="preset-btn" id="collabBtn">Start a session</button>
+    <span class="collab-hint" id="collabHint"></span>
+  </div>
 
   <canvas id="visualizer" class="viz-canvas" width="500" height="100"></canvas>
 
@@ -132,11 +151,21 @@
   let scheduledEvents = [];
 
   // --- WEBSOCKET SETUP ---
-  // Same host/port as the page when served over HTTP; localhost fallback for file://
-  const WS_URL = location.protocol.startsWith('http')
-    ? `ws://${location.host}`
-    : 'ws://localhost:8080';
+  // Hosted (https) pages sync through the Cloudflare relay, one room per invite
+  // code in the URL hash. Local dev keeps the node server's single shared room.
+  const RELAY_HOST = 'audio-collab.jonezzyboy.workers.dev';
+  const IS_LOCAL = location.protocol !== 'https:';
+  let room = new URLSearchParams(location.hash.slice(1)).get('room');
   let ws = null;
+
+  function wsUrl() {
+    if (IS_LOCAL) {
+      return location.protocol.startsWith('http')
+        ? `ws://${location.host}`
+        : 'ws://localhost:8080';
+    }
+    return room ? `wss://${RELAY_HOST}/room/${encodeURIComponent(room)}` : null;
+  }
   const myId = Math.random().toString(36).substr(2, 9);
   const myColor = '#' + Math.floor(Math.random() * 0x1000000).toString(16).padStart(6, '0');
 
@@ -157,25 +186,35 @@
     stopBtn:   document.getElementById('stopBtn'),
     loop:      document.getElementById('loopToggle'),
     dlBtn:     document.getElementById('downloadBtn'),
-    canvas:    document.getElementById('visualizer')
+    canvas:    document.getElementById('visualizer'),
+    collabRow: document.getElementById('collabRow'),
+    collabBtn: document.getElementById('collabBtn'),
+    collabHint: document.getElementById('collabHint')
   };
   const canvasCtx = els.canvas.getContext('2d');
 
   // --- WEBSOCKET HANDLERS ---
 
+  function setStatus(text, color) {
+    els.status.innerText = text;
+    els.status.style.color = color;
+  }
+
   function connectWs() {
+    const url = wsUrl();
+    if (!url) {
+      setStatus('(Solo)', '#b2bec3');
+      return;
+    }
     try {
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(url);
     } catch {
-      // https pages can't open ws:// (mixed content) — run solo
-      els.status.innerText = '(Offline)';
-      els.status.style.color = '#b2bec3';
+      setStatus('(Offline)', '#b2bec3');
       return;
     }
 
     ws.onopen = () => {
-      els.status.innerText = '(Connected)';
-      els.status.style.color = 'green';
+      setStatus('(Connected)', 'green');
       // Send initial "hello"
       sendMsg({ type: 'join', color: myColor });
     };
@@ -206,12 +245,48 @@
     };
 
     ws.onclose = () => {
-      els.status.innerText = '(Offline)';
-      els.status.style.color = '#b2bec3';
+      setStatus('(Offline)', '#b2bec3');
       setTimeout(connectWs, 3000); // Auto-reconnect
     };
   }
   connectWs();
+
+  // --- COLLAB SESSIONS (hosted only) ---
+
+  function updateCollabUi() {
+    if (IS_LOCAL) {
+      els.collabRow.hidden = true; // Local server is one shared room already
+      return;
+    }
+    els.collabBtn.innerText = room ? 'Copy invite link' : 'Start a session';
+    els.collabHint.innerText = room
+      ? `Room ${room} — everyone on the link edits together`
+      : 'Get a link that lets others jam on this sequence live';
+  }
+
+  els.collabBtn.addEventListener('click', async () => {
+    if (!room) {
+      room = Math.random().toString(36).slice(2, 8).toUpperCase();
+      location.hash = 'room=' + room;
+      updateCollabUi();
+      connectWs();
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(location.href);
+      els.collabBtn.innerText = 'Copied!';
+      setTimeout(updateCollabUi, 1500);
+    } catch {
+      els.collabHint.innerText = location.href; // Clipboard blocked — show the link instead
+    }
+  });
+
+  window.addEventListener('hashchange', () => {
+    const next = new URLSearchParams(location.hash.slice(1)).get('room');
+    if (next !== room) location.reload();
+  });
+
+  updateCollabUi();
 
   function sendMsg(payload) {
     if (ws && ws.readyState === WebSocket.OPEN) {
