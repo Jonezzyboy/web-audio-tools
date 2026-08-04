@@ -164,7 +164,14 @@
   // --- WEBSOCKET HANDLERS ---
 
   function connectWs() {
-    ws = new WebSocket(WS_URL);
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch {
+      // https pages can't open ws:// (mixed content) — run solo
+      els.status.innerText = '(Offline)';
+      els.status.style.color = '#b2bec3';
+      return;
+    }
 
     ws.onopen = () => {
       els.status.innerText = '(Connected)';
