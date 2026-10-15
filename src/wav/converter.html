@@ -5,33 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WAV to MP3 Converter</title>
   <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141a26'/%3E%3Cpath d='M4 16h5l3-8 4 16 4-12 2 4h6' fill='none' stroke='%23ffb000' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="theme.css">
   <style>
-    /* Page-specific styles */
-    .card {
-      text-align: center;
-    }
-
     .drop-zone {
-      border: 2px dashed #ccc;
-      padding: 30px;
-      border-radius: 8px;
-      margin: 20px 0;
-      transition: all 0.2s;
+      display: grid;
+      place-items: center;
+      gap: 6px;
+      text-align: center;
+      border: 1.5px dashed var(--line);
+      padding: 36px 20px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 18px;
       cursor: pointer;
-      background: #fafafa;
+      background: var(--inset);
+      transition: border-color 0.12s, background-color 0.12s;
     }
 
     .drop-zone:hover, .drop-zone.dragover {
-      border-color: var(--primary);
-      background: #eef6ff;
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 6%, var(--inset));
+    }
+
+    .drop-zone svg {
+      width: 28px;
+      height: 28px;
+      stroke: var(--muted);
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .drop-zone p {
       margin: 0;
-      color: #666;
+      color: var(--muted);
       font-size: 0.9rem;
       pointer-events: none;
+    }
+
+    .drop-zone strong {
+      color: var(--ink);
+      font-weight: 600;
     }
 
     input[type="file"] {
@@ -40,57 +58,51 @@
 
     .options-row {
       display: flex;
-      justify-content: center;
+      justify-content: space-between;
       align-items: center;
       gap: 10px;
       font-size: 0.9rem;
-    }
-
-    .options-row select {
-      padding: 6px;
-      border: 1px solid #dcdde1;
-      border-radius: 4px;
-      font-family: monospace;
+      font-weight: 600;
     }
 
     #status {
-      margin-top: 15px;
-      font-weight: bold;
+      margin-top: 16px;
       font-size: 0.9rem;
-      min-height: 1.2em;
+      min-height: 1.4em;
+      display: flex;
+      align-items: center;
+    }
+
+    #status:empty {
+      margin-top: 0;
     }
 
     .success {
-      color: #28a745;
+      color: var(--ok);
     }
 
     .error {
-      color: #dc3545;
+      color: var(--danger);
     }
 
     .processing {
-      color: var(--primary);
+      color: var(--ink);
     }
 
-    /* Spinner */
     .loader {
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid var(--primary);
+      border: 2px solid var(--line);
+      border-top-color: var(--accent);
       border-radius: 50%;
-      width: 20px;
-      height: 20px;
-      animation: spin 1s linear infinite;
+      width: 16px;
+      height: 16px;
+      animation: spin 0.8s linear infinite;
       display: inline-block;
-      vertical-align: middle;
       margin-right: 8px;
-      display: none;
+      flex-shrink: 0;
     }
 
     @keyframes spin {
-      0% {
-        transform: rotate(0deg);
-      }
-      100% {
+      to {
         transform: rotate(360deg);
       }
     }
@@ -100,16 +112,19 @@
 
 <div class="card">
   <a class="back-link" href="../index.html">← All tools</a>
-  <h1>WAV to MP3</h1>
+  <div class="tool-head">
+    <h1>WAV to MP3</h1>
+  </div>
 
-  <div class="drop-zone" id="dropZone">
-    <p>Drag & Drop WAV files here<br>or click to browse</p>
+  <div class="drop-zone" id="dropZone" role="button" tabindex="0">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+    <p><strong>Drop WAV files here</strong><br>or click to choose files</p>
   </div>
   <input type="file" id="fileInput" accept="audio/wav, audio/x-wav" multiple>
 
   <div class="options-row">
-    <label for="bitrate">MP3 Bitrate</label>
-    <select id="bitrate">
+    <label for="bitrate">MP3 bitrate</label>
+    <select id="bitrate" class="num-input">
       <option value="96">96 kbps</option>
       <option value="128" selected>128 kbps</option>
       <option value="192">192 kbps</option>
@@ -127,6 +142,14 @@
 
   // --- UI Handling ---
   dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('keydown', (e) =>
+  {
+    if(e.key === 'Enter' || e.key === ' ')
+    {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
 
   dropZone.addEventListener('dragover', (e) =>
   {
@@ -167,7 +190,7 @@
     const files = Array.from(fileList).filter(isWav);
     if(!files.length)
     {
-      showStatus('Error: Please upload WAV files.', 'error');
+      showStatus('Those files aren’t WAVs. Choose .wav files to convert.', 'error');
       return;
     }
 
@@ -180,7 +203,7 @@
       for(const file of files)
       {
         showStatus(
-          `<div class="loader" style="display:inline-block"></div>Converting ${file.name} (${converted + 1}/${files.length})...`,
+          `<span class="loader"></span>Converting ${escapeHtml(file.name)} (${converted + 1} of ${files.length})…`,
           'processing'
         );
 
@@ -192,12 +215,12 @@
         converted++;
       }
 
-      showStatus(`Success! Converted ${converted} file${converted > 1 ? 's' : ''}.`, 'success');
+      showStatus(`Converted ${converted} file${converted > 1 ? 's' : ''} to MP3.`, 'success');
     }
     catch(err)
     {
       console.error(err);
-      showStatus(`Error converting file ${converted + 1} of ${files.length}. See console.`, 'error');
+      showStatus(`Couldn’t convert file ${converted + 1} of ${files.length}. It may be corrupt or an unsupported WAV format.`, 'error');
     }
     finally
     {
@@ -216,6 +239,13 @@
     a.click();
     a.remove();
     setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+
+  function escapeHtml(text)
+  {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
   function showStatus(msg, type)

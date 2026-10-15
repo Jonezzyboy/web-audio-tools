@@ -3,15 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced Sequencer</title>
+  <title>Tone Sequencer</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141a26'/%3E%3Cpath d='M4 16h5l3-8 4 16 4-12 2 4h6' fill='none' stroke='%23ffb000' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="theme.css">
   <style>
-    /* Cursor & Avatar Styles */
     #cursorLayer {
       position: absolute;
       top: 0; left: 0;
       width: 100%; height: 100%;
-      pointer-events: none; /* Let clicks pass through */
+      pointer-events: none;
       overflow: hidden;
       z-index: 1000;
     }
@@ -34,8 +37,8 @@
     }
 
     .cursor-label {
-      background: rgba(0,0,0,0.7);
-      color: white;
+      background: var(--screen);
+      color: #fff;
       padding: 2px 6px;
       border-radius: 4px;
       font-size: 10px;
@@ -43,52 +46,56 @@
       white-space: nowrap;
     }
 
-    .loop-toggle {
-      display: flex;
+    .conn-status {
+      display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 0.85rem;
-      color: #636e72;
-      cursor: pointer;
-      justify-content: center;
+      font-size: 0.8rem;
+      color: var(--muted);
+      white-space: nowrap;
     }
 
-    button:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-      transform: none !important;
+    .conn-status::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--line);
     }
+
+    .conn-status[data-tone="on"]::before { background: var(--ok); }
+    .conn-status[data-tone="warn"] { color: var(--ink); }
+    .conn-status[data-tone="warn"]::before { background: var(--signal); }
+    .conn-status[data-tone="bad"] { color: var(--danger); }
+    .conn-status[data-tone="bad"]::before { background: var(--danger); }
 
     .collab-row {
       display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 14px;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .collab-row .btn-ghost {
+      flex-shrink: 0;
     }
 
     .collab-hint {
       font-size: 0.8rem;
-      color: #636e72;
+      color: var(--muted);
+      overflow-wrap: anywhere;
     }
 
     .users-panel {
-      max-width: 320px;
-      margin: 0 auto 14px;
-      padding: 10px 14px;
-      border: 1px solid var(--border, #dfe6e9);
-      border-radius: 8px;
+      margin-bottom: 16px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
       font-size: 0.85rem;
     }
 
-    .users-title {
-      font-weight: 600;
-      color: #636e72;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 6px;
+    .users-panel .section-label {
+      margin-bottom: 4px;
     }
 
     .users-list {
@@ -111,21 +118,47 @@
       flex-shrink: 0;
     }
 
-    .user-name { flex: 1; text-align: left; }
+    .user-name { flex: 1; }
 
     .kick-btn {
       font-size: 0.75rem;
-      padding: 2px 10px;
-      border: 1px solid #d63031;
-      color: #d63031;
+      font-weight: 500;
+      padding: 3px 10px;
+      border: 1px solid var(--line);
+      color: var(--danger);
       background: none;
-      border-radius: 4px;
-      cursor: pointer;
     }
 
     .kick-btn:hover {
-      background: #d63031;
-      color: white;
+      border-color: var(--danger);
+    }
+
+    .presets {
+      margin-bottom: 20px;
+    }
+
+    .steps-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .steps-head small {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .loop-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.85rem;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .loop-toggle input {
+      accent-color: var(--accent);
     }
   </style>
 </head>
@@ -133,68 +166,76 @@
 
 <div id="cursorLayer"></div>
 
-<div class="container" id="appContainer">
+<div class="container wide" id="appContainer">
   <a class="back-link" href="../index.html">← All tools</a>
-  <h1>Tone Sequencer <span id="connectionStatus" style="font-size:0.5em; color:#b2bec3;">(Offline)</span></h1>
+  <div class="tool-head">
+    <h1>Tone Sequencer</h1>
+    <span id="connectionStatus" class="conn-status">Offline</span>
+  </div>
 
   <div class="collab-row" id="collabRow">
-    <button class="preset-btn" id="collabBtn">Start a session</button>
+    <button class="btn-ghost" id="collabBtn">Start a session</button>
     <span class="collab-hint" id="collabHint"></span>
   </div>
 
   <div class="users-panel" id="usersPanel" hidden>
-    <div class="users-title">In this session</div>
+    <span class="section-label">In this session</span>
     <ul class="users-list" id="usersList"></ul>
   </div>
 
-  <canvas id="visualizer" class="viz-canvas" width="500" height="100"></canvas>
+  <canvas id="visualizer" class="viz-canvas" aria-hidden="true"></canvas>
 
   <div class="global-controls">
     <div class="control-row">
-      <label>Speed (ms)</label>
+      <label for="speedRange">Speed <small>ms</small></label>
       <input type="range" id="speedRange" min="50" max="1000" value="120">
-      <input type="number" id="speedNum" class="num-input" value="120">
+      <input type="number" id="speedNum" class="num-input" value="120" aria-label="Speed in ms">
     </div>
 
     <div class="control-row">
-      <label>Base (Hz)</label>
+      <label for="freqRange">Base <small>Hz</small></label>
       <input type="range" id="freqRange" min="50" max="1000" value="440">
-      <input type="number" id="freqNum" class="num-input" value="440">
+      <input type="number" id="freqNum" class="num-input" value="440" aria-label="Base frequency in Hz">
     </div>
 
     <div class="control-row">
-      <label>Decay</label>
+      <label for="decayRange">Decay</label>
       <input type="range" id="decayRange" min="1" max="10" step="0.1" value="2">
-      <input type="number" id="decayNum" class="num-input" value="2" step="0.1">
+      <input type="number" id="decayNum" class="num-input" value="2" step="0.1" aria-label="Decay">
     </div>
 
     <div class="control-row">
-      <label>Wave</label>
+      <label for="waveType">Wave</label>
       <select id="waveType" class="num-input">
         <option value="sine">Sine</option>
         <option value="square">Square</option>
         <option value="sawtooth">Saw</option>
-        <option value="triangle">Tri</option>
+        <option value="triangle">Triangle</option>
       </select>
     </div>
   </div>
 
-  <div class="preset-row" style="margin-bottom: 15px;">
+  <span class="section-label">Presets</span>
+  <div class="preset-row presets">
     <button class="preset-btn" data-preset="arpeggio">Arpeggio</button>
     <button class="preset-btn" data-preset="doorbell">Doorbell</button>
     <button class="preset-btn" data-preset="alarm">Alarm</button>
-    <button class="preset-btn" data-preset="powerup">Power Up</button>
+    <button class="preset-btn" data-preset="powerup">Power up</button>
     <button class="preset-btn" data-preset="descend">Descend</button>
   </div>
 
+  <div class="steps-head">
+    <span class="section-label">Steps</span>
+    <small>Each step is a multiple of the base pitch</small>
+  </div>
   <div id="sequenceContainer" class="sequence-list"></div>
 
   <div class="action-area">
-    <button class="add-btn" id="addToneBtn">+ Add Tone Step</button>
+    <button class="add-btn" id="addToneBtn">+ Add step</button>
     <div class="main-btns">
       <button class="btn-primary" id="playBtn">▶ Play</button>
-      <button class="btn-primary btn-secondary" id="stopBtn" disabled>■ Stop</button>
-      <button class="btn-primary btn-secondary" id="downloadBtn">⬇ WAV</button>
+      <button class="btn-secondary" id="stopBtn" disabled>■ Stop</button>
+      <button class="btn-secondary" id="downloadBtn">Download WAV</button>
     </div>
     <label class="loop-toggle">
       <input type="checkbox" id="loopToggle"> Loop playback
@@ -264,28 +305,57 @@
   };
   const canvasCtx = els.canvas.getContext('2d');
 
+  function cssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function fitCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    els.canvas.width = els.canvas.clientWidth * dpr;
+    els.canvas.height = els.canvas.clientHeight * dpr;
+  }
+
+  function drawIdle() {
+    fitCanvas();
+    const {width, height} = els.canvas;
+    canvasCtx.fillStyle = cssVar('--screen');
+    canvasCtx.fillRect(0, 0, width, height);
+    canvasCtx.lineWidth = 1.5 * (window.devicePixelRatio || 1);
+    canvasCtx.globalAlpha = 0.4;
+    canvasCtx.strokeStyle = cssVar('--signal');
+    canvasCtx.beginPath();
+    canvasCtx.moveTo(0, height / 2);
+    canvasCtx.lineTo(width, height / 2);
+    canvasCtx.stroke();
+    canvasCtx.globalAlpha = 1;
+  }
+
+  window.addEventListener('resize', () => { if (!isPlaying) drawIdle(); });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (!isPlaying) drawIdle(); });
+
   // --- WEBSOCKET HANDLERS ---
 
-  function setStatus(text, color) {
+  // tone: off | on | warn | bad
+  function setStatus(text, tone) {
     els.status.innerText = text;
-    els.status.style.color = color;
+    els.status.dataset.tone = tone;
   }
 
   function connectWs() {
     const url = wsUrl();
     if (!url) {
-      setStatus('(Solo)', '#b2bec3');
+      setStatus('Solo', 'off');
       return;
     }
     try {
       ws = new WebSocket(url);
     } catch {
-      setStatus('(Offline)', '#b2bec3');
+      setStatus('Offline', 'off');
       return;
     }
 
     ws.onopen = () => {
-      setStatus('(Connected)', 'green');
+      setStatus('Connected', 'on');
       // Send initial "hello"
       sendMsg({ type: 'join', color: myColor, hostKey: room ? hostKeyFor(room) : null });
     };
@@ -335,12 +405,12 @@
 
     ws.onclose = () => {
       if (wasKicked) {
-        setStatus('(Removed by host)', '#d63031');
+        setStatus('Removed by host', 'bad');
         lastRoster = [];
         renderUsers();
         return; // No reconnect — the host asked us to leave
       }
-      setStatus('(Offline)', '#b2bec3');
+      setStatus('Offline', 'off');
       setTimeout(connectWs, 3000); // Auto-reconnect
     };
   }
@@ -355,8 +425,8 @@
     }
     els.collabBtn.innerText = room ? 'Copy invite link' : 'Start a session';
     els.collabHint.innerText = room
-      ? `Room ${room} — everyone on the link edits together`
-      : 'Get a link that lets others jam on this sequence live';
+      ? `Room ${room}. Anyone with the link can edit with you.`
+      : 'Get a link so others can edit this sequence live.';
   }
 
   els.collabBtn.addEventListener('click', async () => {
@@ -397,7 +467,7 @@
 
       const dot = document.createElement('span');
       dot.className = 'user-dot';
-      dot.style.background = user.color || '#b2bec3';
+      dot.style.background = user.color || 'var(--line)';
 
       const label = document.createElement('span');
       label.className = 'user-name';
@@ -531,6 +601,7 @@
       input.type = 'number';
       input.step = '0.01';
       input.value = multiplier;
+      input.setAttribute('aria-label', `Step ${index + 1} multiplier`);
       // When a user changes a note
       input.onchange = (e) => {
         const v = parseFloat(e.target.value);
@@ -545,6 +616,7 @@
 
       const delBtn = document.createElement('button');
       delBtn.innerText = '✕';
+      delBtn.setAttribute('aria-label', `Remove step ${index + 1}`);
       delBtn.onclick = () => {
         if(sequence.length > 1) {
           sequence.splice(index, 1);
@@ -590,7 +662,7 @@
     els.playBtn.click(); // Auto-preview
   }
 
-  document.querySelectorAll('.preset-btn').forEach(btn => {
+  document.querySelectorAll('[data-preset]').forEach(btn => {
     btn.addEventListener('click', () => applyPreset(btn.dataset.preset));
   });
 
@@ -651,16 +723,19 @@
     analyser.fftSize = 2048;
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
+    fitCanvas();
+    const screenColor = cssVar('--screen');
+    const signalColor = cssVar('--signal');
 
     function draw() {
       if(!isPlaying) return;
       animationId = requestAnimationFrame(draw);
 
       analyser.getByteTimeDomainData(dataArray);
-      canvasCtx.fillStyle = 'rgb(45, 52, 54)';
+      canvasCtx.fillStyle = screenColor;
       canvasCtx.fillRect(0, 0, els.canvas.width, els.canvas.height);
-      canvasCtx.lineWidth = 2;
-      canvasCtx.strokeStyle = 'rgb(85, 239, 196)';
+      canvasCtx.lineWidth = 2 * (window.devicePixelRatio || 1);
+      canvasCtx.strokeStyle = signalColor;
       canvasCtx.beginPath();
 
       const sliceWidth = els.canvas.width * 1.0 / bufferLength;
@@ -696,6 +771,7 @@
     clearTimeout(playTimeout);
     cancelAnimationFrame(animationId);
     document.querySelectorAll('.tone-row').forEach(r => r.classList.remove('is-playing'));
+    drawIdle();
     els.playBtn.disabled = false;
     els.stopBtn.disabled = true;
     if(audioCtx) {
@@ -744,11 +820,11 @@
     if (audioCtx && audioCtx.state === 'suspended') {
       stopPlayback();
       pendingRemotePlay = true;
-      setStatus('(Tap anywhere to hear the session)', '#e17055');
+      setStatus('Tap anywhere to hear the session', 'warn');
       document.addEventListener('pointerdown', () => {
         if (!pendingRemotePlay) return;
         pendingRemotePlay = false;
-        setStatus('(Connected)', 'green');
+        setStatus('Connected', 'on');
         startPlayback(false);
       }, { once: true });
     }
@@ -763,7 +839,7 @@
 
   els.dlBtn.addEventListener('click', async () => {
     const originalText = els.dlBtn.innerText;
-    els.dlBtn.innerText = 'Render...';
+    els.dlBtn.innerText = 'Rendering…';
     try {
       const speedVal = num(els.speedN.value, 120) / 1000;
       const duration = (sequence.length * speedVal) + 2.0;
@@ -818,6 +894,7 @@
 
   // Init
   renderRows(false);
+  drawIdle();
 </script>
 </body>
 </html>

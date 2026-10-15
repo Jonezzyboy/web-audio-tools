@@ -4,39 +4,75 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Web Audio Tools</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23141a26'/%3E%3Cpath d='M4 16h5l3-8 4 16 4-12 2 4h6' fill='none' stroke='%23ffb000' stroke-width='2.5' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="wav/theme.css">
   <style>
+    .intro {
+      margin: 6px 0 22px;
+      color: var(--muted);
+    }
+
     .tool-list {
       display: grid;
-      gap: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
     }
 
     .tool-link {
-      display: block;
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 14px;
+      align-items: start;
       padding: 16px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
       text-decoration: none;
-      color: var(--text);
-      transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tool-link:last-child {
+      border-bottom: none;
+    }
+
+    .tool-link:hover h2 {
+      color: var(--accent);
     }
 
     .tool-link:hover {
-      border-color: var(--primary);
-      box-shadow: 0 4px 10px rgba(108, 92, 231, 0.15);
-      transform: translateY(-1px);
+      background: var(--inset);
+    }
+
+    .tool-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-sm);
+      background: var(--screen);
+      display: grid;
+      place-items: center;
+    }
+
+    .tool-icon svg {
+      width: 24px;
+      height: 24px;
+      stroke: var(--signal);
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .tool-link h2 {
-      margin: 0 0 4px;
+      margin: 0 0 2px;
       font-size: 1rem;
-      color: var(--primary);
+      font-weight: 600;
     }
 
     .tool-link p {
       margin: 0;
-      font-size: 0.85rem;
-      color: #666;
+      font-size: 0.875rem;
+      color: var(--muted);
     }
   </style>
 </head>
@@ -44,23 +80,39 @@
 
 <div class="card">
   <h1>Web Audio Tools</h1>
+  <p class="intro">Small sound utilities that run entirely in your browser.</p>
 
-  <div class="tool-list">
+  <nav class="tool-list">
     <a class="tool-link" href="wav/generator.html">
-      <h2>🔔 Notification Designer</h2>
-      <p>Design two-tap notification sounds with pitch, harmony, speed and decay controls. Export as WAV.</p>
+      <span class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 14l3-3 3 3"/><path d="M11 10l4-4 4 4"/><path d="M6 11v9M15 6v14"/></svg>
+      </span>
+      <div>
+        <h2>Notification Designer</h2>
+        <p>Shape a two-tap alert sound by pitch, harmony, gap and decay, then export it as WAV.</p>
+      </div>
     </a>
 
     <a class="tool-link" href="wav/sequencer.html">
-      <h2>🎹 Tone Sequencer</h2>
-      <p>Build multi-step tone sequences — start a session and share the invite link to edit together with live cursors.</p>
+      <span class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 18V12M9 18V8M14 18v-4M19 18V5"/></svg>
+      </span>
+      <div>
+        <h2>Tone Sequencer</h2>
+        <p>Build multi-step tone sequences and share an invite link to edit them live with others.</p>
+      </div>
     </a>
 
     <a class="tool-link" href="wav/converter.html">
-      <h2>🔄 WAV to MP3 Converter</h2>
-      <p>Convert WAV files to MP3 entirely in the browser. Stereo support, selectable bitrate, batch conversion.</p>
+      <span class="tool-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>
+      </span>
+      <div>
+        <h2>WAV to MP3 Converter</h2>
+        <p>Convert one or many WAV files to MP3 at the bitrate you choose. Nothing is uploaded.</p>
+      </div>
     </a>
-  </div>
+  </nav>
 </div>
 
 </body>
